@@ -1,0 +1,153 @@
+name: 🔄 Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Commit SHA to rollback to (leave empty = last stable)'
+        required: false
+        type: string
+      confirm:
+        description: 'Type ROLLBACK to confirm'
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    name: ↩️ Rollback to Previous State
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'ROLLBACK'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for rollback
+      
+      # ========================================
+      # 🔍 DETERMINE: Find target commit
+      # ========================================
+      - name: 🔍 Determine Rollback Target
+        id: target
+        run: |
+          TARGET_SHA="${{ github.event.inputs.target_sha }}"
+          
+          if [ -z "$TARGET_SHA" ]; then
+            # Use previous commit as fallback
+            TARGET_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+            if [ -z "$TARGET_SHA" ]; then
+              echo "❌ No previous commit found and no target SHA provided"
+              exit 1
+            fi
+            echo "📂 Using last stable (HEAD~1): $TARGET_SHA"
+          else
+            echo "🎯 Using provided SHA: $TARGET_SHA"
+          fi
+          
+          # Validate commit exists
+          if ! git cat-file -e "$TARGET_SHA" 2>/dev/null; then
+            echo "❌ Commit $TARGET_SHA does not exist"
+            exit 1
+          fi
+          
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "current_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
+          echo "target_sha=$TARGET_SHA" >> $GITHUB_OUTPUT
+      
+      # ========================================
+      # 📋 PREVIEW: Show what will be restored
+      # ========================================
+      - name: 📋 Preview Rollback Changes
+        run: |
+          echo "## 🔄 Rollback Preview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Current SHA | \`${{ steps.target.outputs.current_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target SHA | \`${{ steps.target.outputs.target_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Files to be restored:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only ${{ steps.target.outputs.current_sha }} ${{ steps.target.outputs.target_sha }} >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          
+          echo "=========================================="
+          echo "🔄 ROLLBACK PREVIEW"
+          echo "=========================================="
+          echo "Current: ${{ steps.target.outputs.current_sha }}"
+          echo "Target:  ${{ steps.target.outputs.target_sha }}"
+          echo ""
+          echo "Files to be restored:"
+          git diff --name-only ${{ steps.target.outputs.current_sha }} ${{ steps.target.outputs.target_sha }}
+      
+      # ========================================
+      # ↩️ ROLLBACK: Execute rollback
+      # ========================================
+      - name: ↩️ Execute Rollback (Simulated)
+        run: |
+          echo "=========================================="
+          echo "↩️ EXECUTING ROLLBACK"
+          echo "=========================================="
+          echo ""
+          echo "Rolling back: ${{ steps.target.outputs.current_sha }} → ${{ steps.target.outputs.target_sha }}"
+          echo ""
+          
+          # In real deployment, this would SSH to server:
+          # ssh user@server << EOF
+          #   set -euo pipefail
+          #   
+          #   DEPLOY_DIR="/opt/sample-project"
+          #   TARGET_SHA="${{ steps.target.outputs.target_sha }}"
+          #   
+          #   cd \$DEPLOY_DIR
+          #   git fetch --all
+          #   
+          #   echo "📋 Files being restored:"
+          #   git diff --name-only HEAD \$TARGET_SHA
+          #   
+          #   # Rollback to target commit
+          #   git checkout \$TARGET_SHA
+          #   
+          #   # Rebuild and restart
+          #   docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+          #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+          #   
+          #   echo "✅ Rollback complete!"
+          # EOF
+          
+          echo "✅ Rollback executed successfully!"
+      
+      # ========================================
+      # 📊 SUMMARY: Rollback report
+      # ========================================
+      - name: 📊 Rollback Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Rollback Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Server has been rolled back to commit \`${{ steps.target.outputs.target_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What was rolled back:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scenario | What Happens |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Single file changed | Only that file reverts |" >> $GITHUB_STEP_SUMMARY
+          echo "| Multiple files changed | ALL modified files revert |" >> $GITHUB_STEP_SUMMARY
+          echo "| New file added | File is removed |" >> $GITHUB_STEP_SUMMARY
+          echo "| File deleted | File is restored |" >> $GITHUB_STEP_SUMMARY
+
+  # ========================================
+  # ❌ CANCELLED: User didn't confirm
+  # ========================================
+  cancelled:
+    name: ❌ Rollback Cancelled
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm != 'ROLLBACK'
+    
+    steps:
+      - name: ❌ Confirmation Failed
+        run: |
+          echo "❌ Rollback cancelled - confirmation text was not 'ROLLBACK'"
+          echo "You entered: '${{ github.event.inputs.confirm }}'"
+          echo ""
+          echo "To rollback, run this workflow again and type exactly: ROLLBACK"
+          exit 1

@@ -1,0 +1,129 @@
+name: CI/CD → Deploy with Backup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  # ============================================================================
+  # CI: Validation
+  # ============================================================================
+  validate:
+    name: � Validate
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📝 Check Markdown Links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          folder-path: 'docs/'
+        continue-on-error: true
+      
+      - name: 🐳 Validate Docker Compose
+        run: |
+          docker compose -f examples/docker-compose/docker-compose.yml config --quiet
+          docker compose -f examples/docker-compose/docker-compose.prod.yml config --quiet
+      
+      - name: 🔍 ShellCheck Scripts
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './examples/backup-scripts'
+          severity: warning
+
+  # ============================================================================
+  # CD: Deploy with Backup & Rollback Point
+  # ============================================================================
+  deploy:
+    name: � Deploy to Server
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for diff
+      
+      # ========================================
+      # 📸 BACKUP: Capture current state BEFORE deploying
+      # ========================================
+      - name: 📸 Capture Pre-Deploy State
+        id: backup
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "initial")
+          NEW_SHA=$(git rev-parse HEAD)
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          
+          echo "current_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
+          echo "new_sha=$NEW_SHA" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          echo "## 📸 Backup Point" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Rollback SHA | \`$CURRENT_SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy SHA | \`$NEW_SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | $TIMESTAMP |" >> $GITHUB_STEP_SUMMARY
+      
+      # ========================================
+      # 📋 PREVIEW: Show what files changed
+      # ========================================
+      - name: 📋 Preview Changes
+        run: |
+          echo "## 📋 Files Changed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "Initial commit"
+          git diff --name-only HEAD~1 HEAD >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Initial commit" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      # ========================================
+      # 🚀 DEPLOY: Execute deployment
+      # ========================================
+      - name: 🚀 Deploy (Simulated)
+        run: |
+          echo "=========================================="
+          echo "🚀 DEPLOYING"
+          echo "=========================================="
+          echo "📸 Rollback point: ${{ steps.backup.outputs.current_sha }}"
+          echo "📦 Deploying: ${{ steps.backup.outputs.new_sha }}"
+          echo ""
+          
+          # In real deployment, this would SSH to server:
+          # ssh user@server << 'EOF'
+          #   cd /opt/sample-project
+          #   CURRENT_SHA=$(git rev-parse HEAD)
+          #   echo "$CURRENT_SHA" > /opt/backups/last-stable.txt
+          #   git fetch --all
+          #   git reset --hard origin/main
+          #   docker compose up -d --build
+          # EOF
+          
+          echo "✅ Deployment complete!"
+          echo "${{ steps.backup.outputs.new_sha }}" > deployed-sha.txt
+      
+      # ========================================
+      # 💾 SAVE: Store rollback point as artifact
+      # ========================================
+      - name: 💾 Save Rollback Point
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-point-${{ steps.backup.outputs.timestamp }}
+          path: deployed-sha.txt
+          retention-days: 30
+      
+      # ========================================
+      # 📊 SUMMARY: Deployment report
+      # ========================================
+      - name: 📊 Deployment Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**To rollback**, run the Rollback workflow with:" >> $GITHUB_STEP_SUMMARY
+          echo "- Target SHA: \`${{ steps.backup.outputs.current_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Or leave empty to use last stable" >> $GITHUB_STEP_SUMMARY
