@@ -1,6 +1,6 @@
 # DevOps Documentation Framework
 
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen?style=flat&logo=github-actions&logoColor=white)](https://github.com/sample-org/automation-playbook-public/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen?style=flat&logo=github-actions&logoColor=white)](https://github.com/xavlim-public/automation-framework-public?tab=readme-ov-file)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat&logo=github-actions&logoColor=white)
 ![Nginx](https://img.shields.io/badge/Nginx-009639?style=flat&logo=nginx&logoColor=white)
